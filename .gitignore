@@ -1,0 +1,11 @@
+.bin/
+dist/
+web/dist/
+web/node_modules/
+node_modules/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+session.json
+.playwright-mcp/
+

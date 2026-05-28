@@ -1,0 +1,19 @@
+{
+  "name": "clankerwatch",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "cwatch": "./scripts/cwatch.mjs"
+  },
+  "scripts": {
+    "dev": "bun run ./scripts/cwatch.mjs app",
+    "dev:raw": "bun run ./scripts/cwatch.mjs app --raw",
+    "build": "bun run build:go && bun run build:web",
+    "build:go": "go build -o .bin/cwatch.exe ./cmd/cwatch",
+    "build:web": "bun run --cwd web build",
+    "test:go": "go test ./..."
+  },
+  "devDependencies": {
+    "portless": "^0.13.1"
+  }
+}
