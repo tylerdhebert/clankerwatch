@@ -190,6 +190,7 @@ async function startApp() {
     if (shuttingDown && !force) return;
     shuttingDown = true;
     await shutdownChildren(children, { force });
+    if (!rawMode) await prunePortless();
     process.exit(0);
   };
 
@@ -210,6 +211,25 @@ async function trustPortless() {
     child.on("exit", () => resolve());
     child.on("error", (error) => {
       process.stderr.write(`portless trust preflight failed: ${error.message}\n`);
+      resolve();
+    });
+  });
+}
+
+async function prunePortless() {
+  await new Promise((resolve) => {
+    const child = spawn("bun", ["x", "portless", "prune"], {
+      cwd: root,
+      stdio: "ignore",
+      shell: false,
+    });
+    const timer = setTimeout(resolve, 5_000);
+    child.on("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.on("error", () => {
+      clearTimeout(timer);
       resolve();
     });
   });

@@ -5,42 +5,27 @@ Humans use the web UI; agents use the `cwatch` CLI.
 ## Quick start
 
 1. Ensure the app is running (`cwatch` from repo root, or ask the human to start it).
-2. Create a shell session (PowerShell):
 
-```powershell
-cwatch session create --name "short task name" | iex
-```
-
-3. List profiles and pick one the human configured:
+2. List profiles and pick one the human configured:
 
 ```powershell
 cwatch profile list
 ```
 
-4. Run read-only queries with a real reason:
+3. Pick a short investigation slug once per Cursor chat (lowercase letters, numbers, hyphens):
 
 ```powershell
-cwatch query <profile> --reason "why this query matters" --sql "select ...;"
+cwatch query <profile> --session storefront-audit --reason "why this query matters" --sql "select ...;"
 ```
 
-5. After each useful query, annotate and highlight rows for the human:
+4. After each useful query, annotate what you learned:
 
 ```powershell
-cwatch annotate <run-id> --note "what you learned"
-cwatch highlight <run-id> --row 4 --note "inspect this row"
+cwatch annotate --session storefront-audit --note "what you learned"
+cwatch annotate --session storefront-audit --rows 4-8 --note "why these rows matter"
 ```
 
-If the shell lost session env:
-
-```powershell
-cwatch session reattach latest | iex
-```
-
-Check server health:
-
-```powershell
-cwatch status
-```
+Use the same `--session` slug for every command in one investigation. Subagents should reuse the slug from the task.
 
 ## Full reference
 
@@ -50,16 +35,17 @@ cwatch status
 ## Rules
 
 - Never ask for database credentials; use configured profiles only.
-- Every query needs `--reason` (or `--reason-file`).
-- Prefer focused read-only SQL; the server blocks obvious writes.
-- Default `query` output is the underlying CLI stdout; add `--json` only when you need run metadata.
+- Every query and annotate needs `--session`.
+- Every query needs `--reason`.
+- Annotate conclusions after each useful query.
+- Use `--rows` when annotating specific rows; those rows are highlighted in the UI for the human.
 
 ## Local paths
 
 | What | Default |
 |------|---------|
 | Audit DB | `%AppData%\clankerwatch\clankerwatch.sqlite` |
-| Session file | `%LocalAppData%\clankerwatch\session.json` |
+| Server file | `%LocalAppData%\clankerwatch\session.json` |
 | Override data | `$env:CWATCH_DATA_DIR` |
 | Override cache | `$env:CWATCH_CACHE_DIR` |
 

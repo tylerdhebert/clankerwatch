@@ -37,10 +37,10 @@ func TestParseAnnotationRowsRejectsDescendingRanges(t *testing.T) {
 	}
 }
 
-func TestQueryMetadataLineIncludesRunID(t *testing.T) {
-	got := queryMetadataLine(QueryResponse{RunID: 42, Status: "succeeded", RowCount: 7})
-	want := "cwatch run 42 succeeded (7 rows)"
+func TestQueryFooterIncludesRunID(t *testing.T) {
+	got := queryFooter(QueryResponse{RunID: 42, Status: "succeeded", RowCount: 7})
+	want := "cwatch: run 42 (7 rows)"
 	if got != want {
-		t.Fatalf("metadata = %q, want %q", got, want)
+		t.Fatalf("footer = %q, want %q", got, want)
 	}
 }

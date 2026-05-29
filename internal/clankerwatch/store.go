@@ -272,19 +272,50 @@ func scanProfile(scanner interface {
 }
 
 func (s *Store) CreateSession(ctx context.Context, name string) (AgentSession, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "agent session"
+	slug, err := NormalizeSessionSlug(name)
+	if err != nil {
+		return AgentSession{}, err
 	}
 	id, err := newSessionID()
 	if err != nil {
 		return AgentSession{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO sessions (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, id, name, now, now); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO sessions (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`, id, slug, now, now); err != nil {
 		return AgentSession{}, err
 	}
 	return s.GetSession(ctx, id)
+}
+
+func (s *Store) EnsureSession(ctx context.Context, slug string) (AgentSession, error) {
+	normalized, err := NormalizeSessionSlug(slug)
+	if err != nil {
+		return AgentSession{}, err
+	}
+	session, err := s.FindSessionBySlug(ctx, normalized)
+	if err == nil {
+		return session, nil
+	}
+	if !errors.Is(err, errSessionNotFound) {
+		return AgentSession{}, err
+	}
+	created, err := s.CreateSession(ctx, normalized)
+	if err != nil {
+		if session, findErr := s.FindSessionBySlug(ctx, normalized); findErr == nil {
+			return session, nil
+		}
+		return AgentSession{}, err
+	}
+	return created, nil
+}
+
+func (s *Store) FindSessionBySlug(ctx context.Context, slug string) (AgentSession, error) {
+	normalized, err := NormalizeSessionSlug(slug)
+	if err != nil {
+		return AgentSession{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, created_at, updated_at FROM sessions WHERE lower(name) = ?`, normalized)
+	return scanAgentSession(row)
 }
 
 func (s *Store) GetSession(ctx context.Context, id string) (AgentSession, error) {
@@ -298,7 +329,12 @@ func (s *Store) FindSession(ctx context.Context, value string) (AgentSession, er
 		row := s.db.QueryRowContext(ctx, `SELECT id, name, created_at, updated_at FROM sessions ORDER BY updated_at DESC, created_at DESC LIMIT 1`)
 		return scanAgentSession(row)
 	}
-	row := s.db.QueryRowContext(ctx, `SELECT id, name, created_at, updated_at FROM sessions WHERE id = ? OR name = ? ORDER BY updated_at DESC LIMIT 1`, value, value)
+	if session, err := s.FindSessionBySlug(ctx, value); err == nil {
+		return session, nil
+	} else if !errors.Is(err, errSessionNotFound) {
+		return AgentSession{}, err
+	}
+	row := s.db.QueryRowContext(ctx, `SELECT id, name, created_at, updated_at FROM sessions WHERE id = ?`, value)
 	return scanAgentSession(row)
 }
 
@@ -328,6 +364,8 @@ func (s *Store) TouchSession(ctx context.Context, id string) error {
 	return err
 }
 
+var errSessionNotFound = errors.New("session was not found")
+
 func scanAgentSession(scanner interface {
 	Scan(dest ...any) error
 }) (AgentSession, error) {
@@ -335,7 +373,7 @@ func scanAgentSession(scanner interface {
 	var createdAt, updatedAt string
 	if err := scanner.Scan(&session.ID, &session.Name, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return AgentSession{}, fmt.Errorf("session was not found")
+			return AgentSession{}, errSessionNotFound
 		}
 		return AgentSession{}, err
 	}
@@ -463,11 +501,10 @@ func (s *Store) GetRun(ctx context.Context, id int64) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
+	run.Notes = annotations
 	for _, annotation := range annotations {
-		if annotation.Kind == "highlight" {
+		if annotation.RowNumber != nil {
 			run.Highlights = append(run.Highlights, annotation)
-		} else {
-			run.Notes = append(run.Notes, annotation)
 		}
 	}
 	return run, nil
@@ -629,7 +666,7 @@ func (s *Store) ListAnnotations(ctx context.Context, runID int64) ([]Annotation,
 
 func (s *Store) highlightMap(ctx context.Context, runID int64) (map[int]bool, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT row_number, row_end FROM annotations
-		WHERE run_id = ? AND kind = 'highlight' AND row_number IS NOT NULL`, runID)
+		WHERE run_id = ? AND row_number IS NOT NULL`, runID)
 	if err != nil {
 		return nil, err
 	}

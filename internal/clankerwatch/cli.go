@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,16 +24,12 @@ func Main(args []string, stdout io.Writer, stderr io.Writer) int {
 		return serveCommand(args[1:], stdout, stderr)
 	case "status":
 		return statusCommand(args[1:], stdout, stderr)
-	case "session":
-		return sessionCommand(args[1:], stdout, stderr)
 	case "profile":
 		return profileCommand(args[1:], stdout, stderr)
 	case "query":
 		return queryCommand(args[1:], stdout, stderr)
 	case "annotate":
-		return annotateCommand(args[1:], stdout, stderr, "note")
-	case "highlight":
-		return annotateCommand(args[1:], stdout, stderr, "highlight")
+		return annotateCommand(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		printUsage(stderr)
@@ -46,113 +41,32 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "cwatch")
 	fmt.Fprintln(w, "  serve [--host 127.0.0.1] [--port 48731]")
 	fmt.Fprintln(w, "  status [--json]")
-	fmt.Fprintln(w, "  session create [--name <name>] [--json]")
-	fmt.Fprintln(w, "  session reattach [<id|name|latest>] [--json]")
-	fmt.Fprintln(w, "  session list [--json]")
 	fmt.Fprintln(w, "  profile list [--json]")
 	fmt.Fprintln(w, "  profile show <name> [--json]")
-	fmt.Fprintln(w, "  query <profile> --reason <text> --sql <sql> [--json]")
-	fmt.Fprintln(w, "  query <profile> --reason <text> --file <query.sql> [--json]")
-	fmt.Fprintln(w, "  query <profile> --reason <text> --stdin [--json]")
-	fmt.Fprintln(w, "  annotate <run-id> --note <text> [--row <n> [--to <n>] | --rows <n-m>] [--json]")
-	fmt.Fprintln(w, "  highlight <run-id> --row <n> [--to <n>] --note <text> [--json]")
-	fmt.Fprintln(w, "  highlight <run-id> --rows <n-m> --note <text> [--json]")
+	fmt.Fprintln(w, "  query <profile> --session <slug> --reason <text> --sql <sql> [--json]")
+	fmt.Fprintln(w, "  query <profile> --session <slug> --reason <text> --file <query.sql> [--json]")
+	fmt.Fprintln(w, "  query <profile> --session <slug> --reason <text> --stdin [--json]")
+	fmt.Fprintln(w, "  annotate --session <slug> [<run-id>] --note <text> [--row <n> [--to <n>] | --rows <n-m>] [--json]")
 }
 
-func sessionCommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "session subcommand is required")
-		fmt.Fprintln(stderr, "usage: cwatch session create|reattach|list")
-		return 2
-	}
-	switch args[0] {
-	case "create":
-		return sessionCreateCommand(args[1:], stdout, stderr)
-	case "reattach":
-		return sessionReattachCommand(args[1:], stdout, stderr)
-	case "list":
-		return sessionListCommand(args[1:], stdout, stderr)
-	default:
-		fmt.Fprintf(stderr, "unknown session command %q\n", args[0])
-		return 2
-	}
+func parseSessionFlag(raw string) (string, error) {
+	return NormalizeSessionSlug(raw)
 }
 
-func sessionCreateCommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := flag.NewFlagSet("session create", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	name := fs.String("name", defaultSessionName(), "session name")
-	asJSON := fs.Bool("json", false, "print structured response")
-	if err := fs.Parse(args); err != nil {
-		return 2
+func lookupSession(slug string) (AgentSession, error) {
+	normalized, err := NormalizeSessionSlug(slug)
+	if err != nil {
+		return AgentSession{}, err
 	}
 	var session AgentSession
-	if _, err := requestJSON(http.MethodPost, "/api/sessions", SessionInput{Name: *name}, &session); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
+	status, err := requestJSON(http.MethodGet, "/api/sessions/"+url.PathEscape(normalized), nil, &session)
+	if err != nil {
+		return AgentSession{}, err
 	}
-	printSession(stdout, session, *asJSON)
-	return 0
-}
-
-func sessionReattachCommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	target := "latest"
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		target = args[0]
-		args = args[1:]
+	if status >= 400 {
+		return AgentSession{}, fmt.Errorf("session %q was not found; run a query with --session first", normalized)
 	}
-	fs := flag.NewFlagSet("session reattach", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	asJSON := fs.Bool("json", false, "print structured response")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	var session AgentSession
-	if _, err := requestJSON(http.MethodGet, "/api/sessions/"+url.PathEscape(target), nil, &session); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	printSession(stdout, session, *asJSON)
-	return 0
-}
-
-func sessionListCommand(args []string, stdout io.Writer, stderr io.Writer) int {
-	fs := flag.NewFlagSet("session list", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	asJSON := fs.Bool("json", false, "print structured response")
-	if err := fs.Parse(args); err != nil {
-		return 2
-	}
-	var sessions []AgentSession
-	if _, err := requestJSON(http.MethodGet, "/api/sessions", nil, &sessions); err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	if *asJSON {
-		_ = json.NewEncoder(stdout).Encode(sessions)
-		return 0
-	}
-	for _, session := range sessions {
-		fmt.Fprintf(stdout, "%s\t%s\t%s\n", session.ID, session.Name, session.UpdatedAt.Format(time.RFC3339))
-	}
-	return 0
-}
-
-func printSession(stdout io.Writer, session AgentSession, asJSON bool) {
-	if asJSON {
-		_ = json.NewEncoder(stdout).Encode(session)
-		return
-	}
-	fmt.Fprintf(stdout, "$env:CWATCH_SESSION_ID=%s\n", powershellQuote(session.ID))
-	fmt.Fprintf(stdout, "$env:CWATCH_SESSION_NAME=%s\n", powershellQuote(session.Name))
-}
-
-func powershellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
-}
-
-func activeSessionID() string {
-	return os.Getenv("CWATCH_SESSION_ID")
+	return session, nil
 }
 
 func defaultAPIPort() int {
@@ -163,18 +77,6 @@ func defaultAPIPort() int {
 		}
 	}
 	return 48731
-}
-
-func defaultSessionName() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "agent session"
-	}
-	name := strings.TrimSpace(filepath.Base(dir))
-	if name == "" {
-		return "agent session"
-	}
-	return name + " / agent / " + time.Now().Format("3:04 PM")
 }
 
 func statusCommand(args []string, stdout io.Writer, stderr io.Writer) int {
@@ -354,6 +256,7 @@ func queryCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	profile := args[0]
 	fs := flag.NewFlagSet("query", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	session := fs.String("session", "", "investigation session slug")
 	reason := fs.String("reason", "", "why this query is being run")
 	reasonFile := fs.String("reason-file", "", "path to a file containing the query reason")
 	sqlText := fs.String("sql", "", "sql to run")
@@ -393,13 +296,22 @@ func queryCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "--sql, --file, or --stdin is required")
 		return 2
 	}
+	if strings.TrimSpace(queryReason) == "" {
+		fmt.Fprintln(stderr, "--reason is required")
+		return 2
+	}
+	sessionSlug, err := parseSessionFlag(*session)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
 
 	var response QueryResponse
 	status, err := requestJSON(http.MethodPost, "/api/query", QueryRequest{
-		SessionID: activeSessionID(),
-		Profile:   profile,
-		Reason:    queryReason,
-		SQL:       query,
+		Session: sessionSlug,
+		Profile: profile,
+		Reason:  queryReason,
+		SQL:     query,
 	}, &response)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -408,14 +320,21 @@ func queryCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	if *asJSON {
 		_ = json.NewEncoder(stdout).Encode(response)
 	} else {
-		fmt.Fprint(stdout, response.Stdout)
-		fmt.Fprintln(stderr, queryMetadataLine(response))
+		if len(response.Columns) > 0 && len(response.Rows) > 0 {
+			printNumberedTable(stdout, response.Columns, response.Rows)
+		} else if response.ParseError != "" {
+			fmt.Fprint(stdout, response.Stdout)
+			fmt.Fprintf(stderr, "cwatch: could not parse table output; row annotations unavailable\n")
+		} else {
+			fmt.Fprint(stdout, response.Stdout)
+		}
 		if response.Stderr != "" {
 			fmt.Fprint(stderr, response.Stderr)
 			if !strings.HasSuffix(response.Stderr, "\n") {
 				fmt.Fprintln(stderr)
 			}
 		}
+		fmt.Fprintln(stdout, queryFooter(response))
 	}
 	if response.ExitCode != nil {
 		return *response.ExitCode
@@ -426,34 +345,98 @@ func queryCommand(args []string, stdout io.Writer, stderr io.Writer) int {
 	return 0
 }
 
-func queryMetadataLine(response QueryResponse) string {
-	line := fmt.Sprintf("cwatch run %d %s", response.RunID, response.Status)
+func queryFooter(response QueryResponse) string {
+	line := fmt.Sprintf("cwatch: run %d", response.RunID)
 	if response.RowCount > 0 {
 		line += fmt.Sprintf(" (%d rows)", response.RowCount)
 	}
 	return line
 }
 
-func annotateCommand(args []string, stdout io.Writer, stderr io.Writer, kind string) int {
-	if len(args) == 0 {
-		fmt.Fprintln(stderr, "run id is required")
-		return 2
+func printNumberedTable(w io.Writer, columns []string, rows [][]string) {
+	numWidth := len(strconv.Itoa(len(rows)))
+	if numWidth < 1 {
+		numWidth = 1
 	}
-	runID, err := strconv.ParseInt(args[0], 10, 64)
-	if err != nil {
-		fmt.Fprintln(stderr, "run id must be a number")
-		return 2
+
+	colWidths := make([]int, len(columns))
+	for i, col := range columns {
+		colWidths[i] = len(col)
 	}
-	fs := flag.NewFlagSet(kind, flag.ContinueOnError)
+	for _, row := range rows {
+		for i, cell := range row {
+			if i < len(colWidths) && len(cell) > colWidths[i] {
+				colWidths[i] = len(cell)
+			}
+		}
+	}
+
+	fmt.Fprintf(w, "%*s", numWidth, "#")
+	for i, col := range columns {
+		fmt.Fprintf(w, " | %-*s", colWidths[i], col)
+	}
+	fmt.Fprintln(w)
+
+	fmt.Fprintf(w, "%s", strings.Repeat("-", numWidth))
+	for _, cw := range colWidths {
+		fmt.Fprintf(w, "-+-%-s", strings.Repeat("-", cw))
+	}
+	fmt.Fprintln(w)
+
+	for rowIdx, row := range rows {
+		fmt.Fprintf(w, "%*d", numWidth, rowIdx+1)
+		for i := 0; i < len(columns); i++ {
+			cell := ""
+			if i < len(row) {
+				cell = row[i]
+			}
+			fmt.Fprintf(w, " | %-*s", colWidths[i], cell)
+		}
+		fmt.Fprintln(w)
+	}
+}
+
+func annotateCommand(args []string, stdout io.Writer, stderr io.Writer) int {
+	fs := flag.NewFlagSet("annotate", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	session := fs.String("session", "", "investigation session slug")
 	note := fs.String("note", "", "annotation note")
 	noteFile := fs.String("note-file", "", "path to a file containing the note")
 	row := fs.Int("row", 0, "result row number")
 	rowEnd := fs.Int("to", 0, "ending result row number for a range")
 	rowsRange := fs.String("rows", "", "result row range, like 3-7")
 	asJSON := fs.Bool("json", false, "print structured response")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	var runID int64
+	var explicitRunID bool
+	if len(fs.Args()) > 0 {
+		id, err := strconv.ParseInt(fs.Args()[0], 10, 64)
+		if err != nil {
+			fmt.Fprintln(stderr, "run id must be a number")
+			return 2
+		}
+		runID = id
+		explicitRunID = true
+	}
+	sessionSlug, err := parseSessionFlag(*session)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if !explicitRunID {
+		agentSession, err := lookupSession(sessionSlug)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		latestID, err := resolveLatestRun(agentSession.ID)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		runID = latestID
 	}
 	noteValue := *note
 	if *noteFile != "" {
@@ -473,13 +456,9 @@ func annotateCommand(args []string, stdout io.Writer, stderr io.Writer, kind str
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	if kind == "highlight" && rowNumber == nil {
-		fmt.Fprintln(stderr, "--row or --rows is required for highlight")
-		return 2
-	}
 	var annotation Annotation
 	_, err = requestJSON(http.MethodPost, fmt.Sprintf("/api/runs/%d/annotations", runID), AnnotationInput{
-		Kind:      kind,
+		Kind:      "annotation",
 		Note:      noteValue,
 		RowNumber: rowNumber,
 		RowEnd:    rowEndValue,
@@ -492,9 +471,24 @@ func annotateCommand(args []string, stdout io.Writer, stderr io.Writer, kind str
 	if *asJSON {
 		_ = json.NewEncoder(stdout).Encode(annotation)
 	} else {
-		fmt.Fprintf(stdout, "saved %s %d for run %d\n", kind, annotation.ID, runID)
+		fmt.Fprintf(stdout, "saved annotation %d for run %d\n", annotation.ID, runID)
 	}
 	return 0
+}
+
+func resolveLatestRun(sessionID string) (int64, error) {
+	path := "/api/runs?limit=1"
+	if sessionID != "" {
+		path += "&sessionId=" + sessionID
+	}
+	var runs []RunSummary
+	if _, err := requestJSON(http.MethodGet, path, nil, &runs); err != nil {
+		return 0, fmt.Errorf("could not resolve latest run: %w", err)
+	}
+	if len(runs) == 0 {
+		return 0, fmt.Errorf("no runs found; run a query first")
+	}
+	return runs[0].ID, nil
 }
 
 func parseAnnotationRows(row int, rowEnd int, rowsRange string) (*int, *int, error) {

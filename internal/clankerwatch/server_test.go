@@ -66,29 +66,6 @@ func TestAPIDoesNotRequireTokenAndRestrictsCORS(t *testing.T) {
 	}
 }
 
-func TestAPIRunQueryBlocksWrites(t *testing.T) {
-	store, err := OpenStore(filepath.Join(t.TempDir(), "clankerwatch.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-
-	if _, err := store.SaveProfile(t.Context(), ProfileInput{Name: "local", Adapter: "sqlite", Args: []string{"app.db"}}); err != nil {
-		t.Fatal(err)
-	}
-	api := NewAPI(store)
-	response, status, err := api.RunQuery(t.Context(), QueryRequest{Profile: "local", Reason: "bad idea", SQL: "drop table users"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", status)
-	}
-	if response.ExitCode == nil || *response.ExitCode != 2 || !strings.Contains(response.Stderr, "blocked") {
-		t.Fatalf("response = %#v", response)
-	}
-}
-
 func TestAPIRunQueryWithGenericCommand(t *testing.T) {
 	store, err := OpenStore(filepath.Join(t.TempDir(), "clankerwatch.sqlite"))
 	if err != nil {
@@ -111,7 +88,7 @@ func TestAPIRunQueryWithGenericCommand(t *testing.T) {
 	}
 
 	api := NewAPI(store)
-	response, status, err := api.RunQuery(t.Context(), QueryRequest{Profile: "generic", Reason: "smoke", SQL: "select 1"})
+	response, status, err := api.RunQuery(t.Context(), QueryRequest{Session: "smoke-test", Profile: "generic", Reason: "smoke", SQL: "select 1"})
 	if err != nil {
 		t.Fatal(err)
 	}

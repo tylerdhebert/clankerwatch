@@ -78,21 +78,23 @@ type Annotation struct {
 }
 
 type QueryRequest struct {
-	SessionID string `json:"sessionId"`
-	Profile   string `json:"profile"`
-	Reason    string `json:"reason"`
-	SQL       string `json:"sql"`
+	Session string `json:"session"`
+	Profile string `json:"profile"`
+	Reason  string `json:"reason"`
+	SQL     string `json:"sql"`
 }
 
 type QueryResponse struct {
-	RunID     int64    `json:"runId"`
-	SessionID string   `json:"sessionId"`
-	Status    string   `json:"status"`
-	ExitCode  *int     `json:"exitCode,omitempty"`
-	Stdout    string   `json:"stdout"`
-	Stderr    string   `json:"stderr"`
-	Columns   []string `json:"columns"`
-	RowCount  int      `json:"rowCount"`
+	RunID      int64      `json:"runId"`
+	SessionID  string     `json:"sessionId"`
+	Status     string     `json:"status"`
+	ExitCode   *int       `json:"exitCode,omitempty"`
+	Stdout     string     `json:"stdout"`
+	Stderr     string     `json:"stderr"`
+	Columns    []string   `json:"columns"`
+	Rows       [][]string `json:"rows,omitempty"`
+	RowCount   int        `json:"rowCount"`
+	ParseError string     `json:"parseError,omitempty"`
 }
 
 type AgentSession struct {

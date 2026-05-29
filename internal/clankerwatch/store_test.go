@@ -27,7 +27,7 @@ func TestStoreProfileRunRowsAndAnnotations(t *testing.T) {
 		t.Fatalf("profile defaults/env were not saved: %#v", profile)
 	}
 
-	session, err := store.CreateSession(ctx, "test agent")
+	session, err := store.CreateSession(ctx, "test-agent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestStoreProfileRunRowsAndAnnotations(t *testing.T) {
 
 	n := 1
 	end := 2
-	if _, err := store.AddAnnotation(ctx, AnnotationInput{Kind: "highlight", RowNumber: &n, RowEnd: &end, Note: "important"}, run.ID); err != nil {
+	if _, err := store.AddAnnotation(ctx, AnnotationInput{Kind: "annotation", RowNumber: &n, RowEnd: &end, Note: "important"}, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	page, err := store.GetRows(ctx, run.ID, 1, 50)
@@ -60,5 +60,36 @@ func TestStoreProfileRunRowsAndAnnotations(t *testing.T) {
 	}
 	if len(page.Items) != 3 || !page.Items[0].Highlight || !page.Items[1].Highlight || page.Items[2].Highlight {
 		t.Fatalf("rows page = %#v", page)
+	}
+}
+
+func TestStoreEnsureSessionIsCaseInsensitive(t *testing.T) {
+	store, err := OpenStore(filepath.Join(t.TempDir(), "clankerwatch.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	created, err := store.EnsureSession(ctx, "StoreFront-Audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Name != "storefront-audit" {
+		t.Fatalf("name = %q, want storefront-audit", created.Name)
+	}
+	found, err := store.FindSessionBySlug(ctx, "STOREFRONT-audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.ID != created.ID {
+		t.Fatalf("found id = %q, want %q", found.ID, created.ID)
+	}
+	again, err := store.EnsureSession(ctx, "storefront-audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.ID != created.ID {
+		t.Fatalf("ensure created duplicate session: %#v vs %#v", again, created)
 	}
 }

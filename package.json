@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "bun run ./scripts/cwatch.mjs app",
     "dev:raw": "bun run ./scripts/cwatch.mjs app --raw",
+    "setup": "bun run ./scripts/setup.mjs",
     "build": "bun run build:go && bun run build:web",
     "build:go": "go build -o .bin/cwatch.exe ./cmd/cwatch",
     "build:web": "bun run --cwd web build",

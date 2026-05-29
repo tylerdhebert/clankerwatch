@@ -68,7 +68,7 @@ func (api *API) handleSessions(w http.ResponseWriter, r *http.Request) error {
 		}
 		session, err := api.store.CreateSession(r.Context(), input.Name)
 		if err != nil {
-			return err
+			return badRequest(err.Error())
 		}
 		api.events.emit(Event{Type: "sessions"})
 		return writeJSON(w, http.StatusOK, session)
@@ -202,7 +202,13 @@ func (api *API) handleRuns(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != http.MethodGet {
 		return methodNotAllowed()
 	}
-	runs, err := api.store.ListRuns(r.Context(), 100, r.URL.Query().Get("sessionId"))
+	limit := 100
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	runs, err := api.store.ListRuns(r.Context(), limit, r.URL.Query().Get("sessionId"))
 	if err != nil {
 		return err
 	}
@@ -269,9 +275,12 @@ func (api *API) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (api *API) RunQuery(ctx context.Context, input QueryRequest) (QueryResponse, int, error) {
+	input.Session = strings.TrimSpace(input.Session)
 	input.Profile = strings.TrimSpace(input.Profile)
-	input.SessionID = strings.TrimSpace(input.SessionID)
 	input.SQL = strings.TrimSpace(input.SQL)
+	if input.Session == "" {
+		return QueryResponse{}, http.StatusBadRequest, badRequest("session is required")
+	}
 	if input.Profile == "" {
 		return QueryResponse{}, http.StatusBadRequest, badRequest("profile is required")
 	}
@@ -279,31 +288,18 @@ func (api *API) RunQuery(ctx context.Context, input QueryRequest) (QueryResponse
 		return QueryResponse{}, http.StatusBadRequest, badRequest("sql is required")
 	}
 	if strings.TrimSpace(input.Reason) == "" {
-		input.Reason = "query from agent"
+		return QueryResponse{}, http.StatusBadRequest, badRequest("reason is required")
+	}
+	session, err := api.store.EnsureSession(ctx, input.Session)
+	if err != nil {
+		return QueryResponse{}, http.StatusBadRequest, badRequest(err.Error())
 	}
 	profile, err := api.store.GetProfile(ctx, input.Profile)
 	if err != nil {
 		return QueryResponse{}, http.StatusNotFound, notFound()
 	}
 
-	if !IsReadOnlySQL(input.SQL) {
-		run, err := api.store.CreateRun(ctx, input.SessionID, profile.Name, input.SQL, input.Reason, "blocked")
-		if err != nil {
-			return QueryResponse{}, http.StatusInternalServerError, err
-		}
-		stderr := "clankerwatch blocked this query because it does not look read-only"
-		run, err = api.store.FinishRun(ctx, run.ID, "blocked", 2, "", stderr, ParsedTable{})
-		if err != nil {
-			return QueryResponse{}, http.StatusInternalServerError, err
-		}
-		api.events.emit(Event{Type: "runs", RunID: run.ID, Profile: profile.Name})
-		if input.SessionID != "" {
-			_ = api.store.TouchSession(ctx, input.SessionID)
-		}
-		return QueryResponse{RunID: run.ID, SessionID: run.SessionID, Status: run.Status, ExitCode: run.ExitCode, Stderr: run.Stderr}, http.StatusForbidden, nil
-	}
-
-	run, err := api.store.CreateRun(ctx, input.SessionID, profile.Name, input.SQL, input.Reason, "running")
+	run, err := api.store.CreateRun(ctx, session.ID, profile.Name, input.SQL, input.Reason, "running")
 	if err != nil {
 		return QueryResponse{}, http.StatusInternalServerError, err
 	}
@@ -320,18 +316,18 @@ func (api *API) RunQuery(ctx context.Context, input QueryRequest) (QueryResponse
 		return QueryResponse{}, http.StatusInternalServerError, err
 	}
 	api.events.emit(Event{Type: "runs", RunID: run.ID, Profile: profile.Name})
-	if input.SessionID != "" {
-		_ = api.store.TouchSession(ctx, input.SessionID)
-	}
+	_ = api.store.TouchSession(ctx, session.ID)
 	return QueryResponse{
-		RunID:     run.ID,
-		SessionID: run.SessionID,
-		Status:    run.Status,
-		ExitCode:  run.ExitCode,
-		Stdout:    run.Stdout,
-		Stderr:    run.Stderr,
-		Columns:   run.Columns,
-		RowCount:  run.RowCount,
+		RunID:      run.ID,
+		SessionID:  run.SessionID,
+		Status:     run.Status,
+		ExitCode:   run.ExitCode,
+		Stdout:     run.Stdout,
+		Stderr:     run.Stderr,
+		Columns:    run.Columns,
+		Rows:       parsed.Rows,
+		RowCount:   run.RowCount,
+		ParseError: parsed.Error,
 	}, http.StatusOK, nil
 }
 

@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Sun,
   Terminal,
+  Plus,
   TowerControl,
   X,
 } from "lucide-vue-next";
@@ -198,6 +199,23 @@ function pickProfile(profile: Profile) {
 
 function openProfiles() {
   profileModalOpen.value = true;
+}
+
+function newProfile() {
+  const base = "new-profile";
+  let name = base;
+  let n = 1;
+  while (profiles.value.some((profile) => profile.name === name)) {
+    name = `${base}-${n++}`;
+  }
+  profileForm.name = name;
+  profileForm.adapter = "sqlite";
+  profileForm.command = "";
+  profileForm.argsText = "";
+  profileForm.envText = "";
+  profileForm.secretEnvText = "";
+  profileForm.timeoutMs = 30000;
+  profileForm.maxRows = 1000;
 }
 
 function loadTheme() {
@@ -401,18 +419,24 @@ onMounted(async () => {
 
         <div class="profile-modal-body">
           <section class="profile-list">
-            <button
-              v-for="profile in profiles"
-              :key="profile.name"
-              class="profile-item"
-              :class="{ selected: profile.name === profileForm.name }"
-              @click="pickProfile(profile)"
-            >
-              <span>
-                <strong>{{ profile.name }}</strong>
-                <small>{{ profile.adapter }}</small>
-              </span>
-              <span class="unlock-dot" :class="{ on: profile.unlocked }"></span>
+            <div class="profile-list-scroll">
+              <button
+                v-for="profile in profiles"
+                :key="profile.name"
+                class="profile-item"
+                :class="{ selected: profile.name === profileForm.name }"
+                @click="pickProfile(profile)"
+              >
+                <span>
+                  <strong>{{ profile.name }}</strong>
+                  <small>{{ profile.adapter }}</small>
+                </span>
+                <span class="unlock-dot" :class="{ on: profile.unlocked }"></span>
+              </button>
+            </div>
+            <button type="button" class="profile-add" @click="newProfile">
+              <Plus :size="16" />
+              <span>add profile</span>
             </button>
           </section>
 

@@ -1,6 +1,6 @@
 # clankerwatch
 
-`clankerwatch` is a local database query watcher for agent-driven debugging. The human configures database CLI profiles in the browser, and agents use the `cwatch` CLI to run queries, annotate what they learned, and highlight result rows.
+`clankerwatch` is a local database query watcher for agent-driven debugging. The human configures database CLI profiles in the browser, and agents use the `cwatch` CLI to run queries and annotate what they learned.
 
 The app serves at `https://cwatch.localhost` through Vercel Portless. The Go API serves at `https://cwatchapi.localhost`.
 
@@ -8,15 +8,13 @@ The app serves at `https://cwatch.localhost` through Vercel Portless. The Go API
 
 ### humans
 
-Install dependencies and link the command:
+One-command setup (requires [Go](https://go.dev/dl/) and [Bun](https://bun.sh/)):
 
 ```powershell
-bun install
-Push-Location web
-bun install
-Pop-Location
-bun link
+bun run setup
 ```
+
+This installs dependencies, links `cwatch`, and builds the CLI and web app.
 
 Start the app:
 
@@ -38,53 +36,31 @@ Raw mode uses `http://127.0.0.1:5173` for Vue and `http://127.0.0.1:48731` for t
 
 ### agents
 
-Start a shell-scoped clankerwatch session:
+Run queries through configured profiles (pick one `--session` slug per investigation):
 
 ```powershell
-cwatch session create --name "short task name" | iex
+cwatch query effortless-sqlite --session effort-audit --reason "checking active efforts" --sql "select id, short_ref, status from efforts;"
 ```
 
-Run queries through configured profiles:
+Annotate what you learned (targets latest run in that session by default):
 
 ```powershell
-cwatch query effortless-sqlite --reason "checking active efforts" --sql "select id, short_ref, status from efforts;"
-```
-
-Annotate what you learned:
-
-```powershell
-cwatch annotate 12 --note "The active effort count matches the dashboard."
-cwatch annotate 12 --rows 3-7 --note "These rows share the same status transition."
-```
-
-Highlight rows for the human:
-
-```powershell
-cwatch highlight 12 --row 4 --note "This row has the unexpected state."
-cwatch highlight 12 --rows 3-7 --note "Inspect this contiguous range."
-```
-
-If the shell loses its session env:
-
-```powershell
-cwatch session reattach latest | iex
+cwatch annotate --session effort-audit --note "The active effort count matches the dashboard."
+cwatch annotate --session effort-audit --rows 3-7 --note "These rows share the same status transition."
 ```
 
 ## CLI
 
 ```powershell
-cwatch status
 cwatch profile list
 cwatch profile show effortless-sqlite
-cwatch session list
-cwatch query <profile> --reason <text> --sql <sql>
-cwatch query <profile> --reason <text> --file .\query.sql
-Get-Content .\query.sql | cwatch query <profile> --reason <text> --stdin
-cwatch annotate <run-id> --note <text>
-cwatch highlight <run-id> --rows 1-3 --note <text>
+cwatch query <profile> --session <slug> --reason <text> --sql <sql>
+cwatch query <profile> --session <slug> --reason <text> --file .\query.sql
+Get-Content .\query.sql | cwatch query <profile> --session <slug> --reason <text> --stdin
+cwatch annotate --session <slug> [<run-id>] --note <text> [--rows <n-m>]
 ```
 
-By default, `query` prints the wrapped database CLI stdout. Add `--json` when structured run metadata is useful.
+By default, `query` prints a numbered table with a run id footer. Add `--json` when structured metadata is needed.
 
 ## Profile Examples
 
